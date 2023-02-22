@@ -1,10 +1,9 @@
 #![no_std]
-#![feature(asm)]
-#![feature(llvm_asm)]
 
 use libc::{c_void, size_t};
-use mersenne_twister::MersenneTwister;
-use rand::{Rng, SeedableRng};
+use rand::{RngCore, SeedableRng};
+
+type Generator = rand_chacha::ChaCha8Rng;
 
 use nix::sys::mman::{mmap, munmap, MapFlags, ProtFlags};
 
@@ -13,7 +12,8 @@ use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 struct RmallocInner {
-    pub rng: MersenneTwister,
+    pub rng: Generator,
+    #[cfg(feature="safety-checks")]
     pub page_unused: bool,
 }
 
@@ -39,14 +39,16 @@ impl RmallocState {
     }
 
     fn init(&self) {
-        let init_state = self.initializing.compare_and_swap(0, 1, Ordering::SeqCst);
+        let init_state = self.initializing.compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
+            .unwrap_or_else(|e| e);
         if init_state == 2 {
             return;
         } else if init_state == 0 {
             // just set from uninitialized->initializing, actually initialize
-            let rng: MersenneTwister = SeedableRng::from_seed(0xaaaA_aaAA_aaaA_aaAa);
+            let rng: Generator = SeedableRng::from_entropy();
             let inner = RmallocInner {
                 rng,
+                #[cfg(feature="safety-checks")]
                 page_unused: true,
             };
             #[cfg(feature="safety-checks")]
@@ -408,10 +410,10 @@ pub extern "C" fn free(ptr: *mut c_void) {
         (ptr as usize - core::mem::size_of::<AllocMetadata>()) as *mut AllocMetadata;
     unsafe {
         let page_count = alloc_metadata.as_ref().unwrap().page_count as usize;
-        munmap(
+        // idc
+        let _ = munmap(
             alloc_metadata as *mut c_void,
             page_count.wrapping_mul(PAGE_SIZE),
-        )
-        .unwrap();
+        );
     }
 }
