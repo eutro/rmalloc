@@ -45,7 +45,13 @@ impl RmallocState {
             return;
         } else if init_state == 0 {
             // just set from uninitialized->initializing, actually initialize
-            let rng: Generator = SeedableRng::from_entropy();
+            let rng;
+            #[cfg(feature="entropy")] {
+                rng = Generator::from_entropy();
+            }
+            #[cfg(not(feature="entropy"))] {
+                rng = Generator::from_seed([0xa; 32]);
+            }
             let inner = RmallocInner {
                 rng,
                 #[cfg(feature="safety-checks")]
